@@ -1,4 +1,4 @@
-.config
-.images
-.logs
+.config/
+.images/
+.logs/
 

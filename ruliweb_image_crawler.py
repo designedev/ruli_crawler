@@ -108,7 +108,7 @@ def download_img(url_info):
             print(file_name +' has no extension. skip download..')
             return 0 
 
-        save_path = IMAGES_DIRECTORY_NAME + "/" + datetime.datetime.now().strftime("%Y-%m-%d-%H") + "/" + personal_dir_name
+        save_path = IMAGES_DIRECTORY_NAME + "/" + datetime.datetime.now().strftime("%Y-%m-%d") + "/" + personal_dir_name
         make_dir(save_path)
         urllib.request.urlretrieve(url, save_path + "/" + file_name)
         return 0
