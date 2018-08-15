@@ -9,11 +9,12 @@ import re
 import os
 
 FILE_LOCATED_PATH = os.path.dirname(os.path.abspath(__file__))
+IMAGES_VAULT_DIRECTORY_NAME = FILE_LOCATED_PATH + "/raw_vault"
 IMAGES_DIRECTORY_NAME = FILE_LOCATED_PATH + "/images"
 LOGS_DIRECTORY_NAME = FILE_LOCATED_PATH + "/logs"
 CONFIG_DIRECTORY_NAME = FILE_LOCATED_PATH + "/config"
 
-required_dirs = [IMAGES_DIRECTORY_NAME, LOGS_DIRECTORY_NAME, CONFIG_DIRECTORY_NAME]
+required_dirs = [IMAGES_VAULT_DIRECTORY_NAME, IMAGES_DIRECTORY_NAME, LOGS_DIRECTORY_NAME, CONFIG_DIRECTORY_NAME]
 
 def init_dirs():
     for dir in required_dirs:
@@ -49,16 +50,18 @@ def get_html(url):
 
 def get_image_urls(html_text):
     soup = BeautifulSoup(html_text, 'html.parser')
+    nick = soup.find("strong", {"class" : "nick"}).text
+    srl = soup.find("span", {"class" : "member_srl"}).text.replace("(", "").replace(")","")
     images = soup.find("div", {"class" : "board_main_view"}).find_all("img")
-    img_srcs = []
+    img_infos = []
     for image in images:
         # img_srcs.append(image["src"])
         if(image["src"].startswith("//")):
-            img_srcs.append(image["src"].replace("//", "https://"))
+            img_infos.append({"nick" : nick, "srl": srl, "url" : image["src"].replace("//", "https://")})
         else:
-            img_srcs.append(image["src"])
+            img_infos.append({"nick" : nick, "srl": srl, "url" : image["src"]})
 
-    return img_srcs
+    return img_infos
 
 def prepare_urls():
     # 각종 디렉토리 세팅.
@@ -96,10 +99,16 @@ def prepare_urls():
     return urls
 
 
-def download_img(url):
+def download_img(url_info):
     try:
+        url = url_info["url"]
+        personal_dir_name = url_info["nick"] + "(" + url_info["srl"] + ")"
         file_name = url.split("/").pop()
-        save_path = IMAGES_DIRECTORY_NAME + "/" + datetime.datetime.now().strftime("%Y-%m-%d-%H")
+        if (len(file_name.split(".")) == 0): #확장자가 없는 이미지는 다운로드하지 않음.
+            print(file_name +' has no extension. skip download..')
+            return 0 
+
+        save_path = IMAGES_DIRECTORY_NAME + "/" + datetime.datetime.now().strftime("%Y-%m-%d-%H") + "/" + personal_dir_name
         make_dir(save_path)
         urllib.request.urlretrieve(url, save_path + "/" + file_name)
         return 0
@@ -117,12 +126,13 @@ async def find_main(urls):
     result = await asyncio.gather(*futures)                # 결과를 한꺼번에 가져옴
     return result
 
-async def download_fetch(url):
-    response = await loop.run_in_executor(None, download_img, url)    # run_in_executor 사용
+async def download_fetch(url_info):
+    print(url_info)
+    response = await loop.run_in_executor(None, download_img, url_info)    # run_in_executor 사용
     return response
 
-async def download_main(urls):
-    futures = [asyncio.ensure_future(download_fetch(url)) for url in urls]   # 태스크(퓨처) 객체를 리스트로 만듦
+async def download_main(url_infos):
+    futures = [asyncio.ensure_future(download_fetch(url_info)) for url_info in url_infos]   # 태스크(퓨처) 객체를 리스트로 만듦
     result = await asyncio.gather(*futures)                # 결과를 한꺼번에 가져옴
     return result
 
@@ -136,9 +146,9 @@ download_begin = time()
 
 found_image_count = 0
 if (len(image_urls)) > 0 :
-    flatten_image_urls = [item for sublist in image_urls for item in sublist]
-    found_image_count = len(flatten_image_urls)
-    loop.run_until_complete(download_main(flatten_image_urls))  # main이 끝날 때까지 기다림
+    flatten_image_url_infos = [item for sublist in image_urls for item in sublist]
+    found_image_count = len(flatten_image_url_infos)
+    loop.run_until_complete(download_main(flatten_image_url_infos))  # main이 끝날 때까지 기다림
     loop.close()
 else:
     print('no image.')
