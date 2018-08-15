@@ -127,7 +127,6 @@ async def find_main(urls):
     return result
 
 async def download_fetch(url_info):
-    print(url_info)
     response = await loop.run_in_executor(None, download_img, url_info)    # run_in_executor 사용
     return response
 
