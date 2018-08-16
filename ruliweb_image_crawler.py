@@ -7,6 +7,9 @@ from bs4 import BeautifulSoup
 import datetime
 import re
 import os
+import json
+import mysql.connector
+from mysql.connector import Error
 
 FILE_LOCATED_PATH = os.path.dirname(os.path.abspath(__file__))
 IMAGES_VAULT_DIRECTORY_NAME = FILE_LOCATED_PATH + "/raw_vault"
@@ -55,7 +58,6 @@ def get_image_urls(html_text):
     images = soup.find("div", {"class" : "board_main_view"}).find_all("img")
     img_infos = []
     for image in images:
-        # img_srcs.append(image["src"])
         if(image["src"].startswith("//")):
             img_infos.append({"nick" : nick, "srl": srl, "url" : image["src"].replace("//", "https://")})
         else:
@@ -104,14 +106,21 @@ def download_img(url_info):
         url = url_info["url"]
         personal_dir_name = url_info["nick"] + "(" + url_info["srl"] + ")"
         file_name = url.split("/").pop()
-        if (len(file_name.split(".")) == 0): #확장자가 없는 이미지는 다운로드하지 않음.
-            print(file_name +' has no extension. skip download..')
-            return 0 
+        if (len(file_name.split(".")) < 2): #확장자가 없는 이미지는 다운로드하지 않음.
+            print(url," : no file extension. skip download")
+            return 0
 
         save_path = IMAGES_DIRECTORY_NAME + "/" + datetime.datetime.now().strftime("%Y-%m-%d") + "/" + personal_dir_name
-        make_dir(save_path)
-        urllib.request.urlretrieve(url, save_path + "/" + file_name)
-        return 0
+
+        try:
+            make_dir(save_path)
+        except Exception as ex:
+            print("directory creation error(maybe it already exists.), continue download.. ", ex)
+            
+        save_fullpath = save_path + "/" + datetime.datetime.now().strftime('%Y%m%d%H%M%S%f') +"." + file_name.split(".").pop()
+        urllib.request.urlretrieve(url, save_fullpath)
+        size = int(os.path.getsize(save_fullpath)/1024)
+        return (url_info["srl"], url_info["nick"], url, save_fullpath, size)
     except Exception as ex:
         print(url + " Failed to download image..", ex)
         return 0
@@ -135,31 +144,71 @@ async def download_main(url_infos):
     result = await asyncio.gather(*futures)                # 결과를 한꺼번에 가져옴
     return result
 
-find_begin = time()
-urls = prepare_urls()
-loop = asyncio.get_event_loop() # 이벤트 루프를 얻음
-image_urls = loop.run_until_complete(find_main(urls))   # main이 끝날 때까지 기다림
-find_end = time()
-download_begin = time()
 
+# get database connection
 
-found_image_count = 0
-if (len(image_urls)) > 0 :
-    flatten_image_url_infos = [item for sublist in image_urls for item in sublist]
-    found_image_count = len(flatten_image_url_infos)
-    loop.run_until_complete(download_main(flatten_image_url_infos))  # main이 끝날 때까지 기다림
-    loop.close()
-else:
-    print('no image.')
-    loop.close()
+with open("./config/database.json", "r") as f:
+    database_info = json.load(f)
 
-download_end = time()
+host = database_info["host"]
+database = database_info["database"]
+user= database_info["user"]
+password = database_info["password"]
 
-if (found_image_count > 0) :
-    print('==============================================================')
-    print (datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
-    print(' %d images found.'%(found_image_count))
-    print('Searching time : {0:.3f} second'.format(find_end - find_begin))
-    print('Download time : {0:.3f} second'.format(download_end - download_begin))
-    print('==============================================================')
+try:
+    connection = mysql.connector.connect(host=host, database=database, user=user, password=password)
+    if (connection.is_connected()):
+
+        #create cursor..
+        cursor = connection.cursor(prepared=True)
+
+        find_begin = time()
+        urls = prepare_urls()
+        loop = asyncio.get_event_loop() # 이벤트 루프를 얻음
+        image_urls = loop.run_until_complete(find_main(urls))   # main이 끝날 때까지 기다림
+        find_end = time()
+        download_begin = time()
+
+        found_image_count = 0
+        if (len(image_urls)) > 0 :
+            flatten_image_url_infos = [item for sublist in image_urls for item in sublist]
+            found_image_count = len(flatten_image_url_infos)
+            
+            user_add_query = """INSERT INTO ruliweb_users (user_nick, user_srl) SELECT * FROM (SELECT %s as v1, %s as v2) AS tmp WHERE NOT EXISTS (SELECT user_srl FROM ruliweb_users WHERE user_srl = %s) LIMIT 1"""
+
+            query_param_list = list(map(lambda x:(x["nick"],x["srl"],x["srl"]), flatten_image_url_infos))
+            
+            result  = cursor.executemany(user_add_query, query_param_list)
+            connection.commit()
+            print (cursor.rowcount, " new users inserted successfully into users table")
+
+            downloaded_file_infos = loop.run_until_complete(download_main(flatten_image_url_infos))  # main이 끝날 때까지 기다림
+            image_info_add_query = """INSERT INTO ruliweb_image_infos (user_srl, user_nickname, image_path, image_local_path, size, created_at) VALUES (%s,%s,%s,%s,%s,NOW()) """
+            download_success_file_list = list(filter(lambda x:x != 0, downloaded_file_infos))
+            result2 = cursor.executemany(image_info_add_query, download_success_file_list)
+            connection.commit()
+            print( cursor.rowcount, " new image inserted successfully into ruliweb_image_infos table")
+            loop.close()
+        else:
+            print('no image.')
+            loop.close()
+
+        download_end = time()
+
+        if (found_image_count > 0) :
+            print('==============================================================')
+            print (datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+            print(' %d images found.'%(found_image_count))
+            print('Searching time : {0:.3f} second'.format(find_end - find_begin))
+            print('Download time : {0:.3f} second'.format(download_end - download_begin))
+            print('==============================================================')
+
+except mysql.connector.Error as error:
+    print("Failed to connect DB, error :  {}".format(error))
+
+finally:
+    if(connection.is_connected()):
+        cursor.close()
+        connection.close()
+        print("DB Connection closed sucessfully.")
 
