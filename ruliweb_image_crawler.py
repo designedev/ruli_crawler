@@ -176,19 +176,28 @@ try:
             
             user_add_query = """INSERT INTO ruliweb_users (user_nick, user_srl) SELECT * FROM (SELECT %s as v1, %s as v2) AS tmp WHERE NOT EXISTS (SELECT user_srl FROM ruliweb_users WHERE user_srl = %s) LIMIT 1"""
 
-            query_param_list = list(map(lambda x:(x["nick"],x["srl"],x["srl"]), flatten_image_url_infos))
-            
-            result  = cursor.executemany(user_add_query, query_param_list)
+            user_list = list(map(lambda x:(x["nick"],x["srl"],x["srl"]), flatten_image_url_infos))
+            uniq_user_list = list(set(user_list))           
+            result  = cursor.executemany(user_add_query, uniq_user_list)
             connection.commit()
             print (cursor.rowcount, " new users inserted successfully into users table")
 
             downloaded_file_infos = loop.run_until_complete(download_main(flatten_image_url_infos))  # main이 끝날 때까지 기다림
+            loop.close()
+
             image_info_add_query = """INSERT INTO ruliweb_image_infos (user_srl, user_nickname, image_path, image_local_path, size, created_at) VALUES (%s,%s,%s,%s,%s,NOW()) """
             download_success_file_list = list(filter(lambda x:x != 0, downloaded_file_infos))
             result2 = cursor.executemany(image_info_add_query, download_success_file_list)
             connection.commit()
             print( cursor.rowcount, " new image inserted successfully into ruliweb_image_infos table")
-            loop.close()
+            
+            update_user_list = list(map(lambda x:(x[1],x[1]), uniq_user_list))
+            user_image_count_update_query = """update ruliweb_users set image_count = (SELECT count(*) from ruliweb_image_infos where user_srl = %s) where user_srl = %s """
+            result3 = cursor.executemany(user_image_count_update_query, update_user_list)
+            connection.commit()
+            print( cursor.rowcount, " user`s image count data updated..")
+
+            #loop.close()
         else:
             print('no image.')
             loop.close()
