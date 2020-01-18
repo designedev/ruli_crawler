@@ -171,7 +171,6 @@ try:
         flatten_image_url_infos = [item for sublist in image_urls for item in sublist]
         found_image_count = len(flatten_image_url_infos)
         print("{} IMAGE FOUND..".format(found_image_count))
-        print(flatten_image_url_infos)
         downloaded_file_infos = loop.run_until_complete(download_main(flatten_image_url_infos))  # main이 끝날 때까지 기다림
         loop.close()
     else:
