@@ -76,16 +76,19 @@ def prepare_urls():
     html = get_html(URL)
     soup = BeautifulSoup(html, 'html.parser')
 
-    list_table = soup.find("table", {"class" : "board_list_table"}) #아티클 테이블
+    list_table = soup.find("table", {"class" : "board_list_table"}).find("tbody") #아티클 테이블
 
-    id_tds = list_table.find_all("td", {"class" : "id"}) #id 정보 리스트
-    article_ids = list(map(lambda a: int(a.text.replace("\n","").replace(" ","")), id_tds))
+    valid_article_tr = list_table.find_all(
+        lambda tag: tag.name == 'tr' and 'inside' not in tag.get('class', '') and 'list_inner' not in tag.get('class', 'list_inner')
+    )
+    articles = list(map(lambda a: a.find('td', class_=lambda c: c == "id"), valid_article_tr))
+    article_ids = list(map(lambda a: int(a.text.replace("\n","").replace(" ","")), articles))
     max_article_id = max(article_ids)
 
     # 이번 조회에서 얻은 마지막 게시물 ID를 저장함.
     set_max_article_id(max_article_id)
 
-    before_filter_articles = list_table.find_all("tr", {"class" : "table_body"})
+    before_filter_articles = valid_article_tr
     after_filter_articles = []
     for article in before_filter_articles:
         id = article.find("td", {"class" : "id"}).text.replace("\n","").replace(" ","")
@@ -151,12 +154,14 @@ with open("./config/database.json", "r") as f:
     database_info = json.load(f)
 
 host = database_info["host"]
+port = database_info["port"]
 database = database_info["database"]
 user= database_info["user"]
 password = database_info["password"]
+charset ='utf8'
 
 try:
-    connection = mysql.connector.connect(host=host, database=database, user=user, password=password)
+    connection = mysql.connector.connect(host=host, port=port, database=database, user=user, password=password, charset=charset)
     if (connection.is_connected()):
 
         #create cursor..
